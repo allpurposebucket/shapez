@@ -21,6 +21,12 @@ struct Player {
     size: f32,
 }
 
+#[derive(Component)]
+struct Enemy {
+    velocity: Vec2,
+    size: f32,
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -29,6 +35,9 @@ fn main() {
         .add_systems(Update, update_player_size)
         .add_systems(Update, confine_player)
         .add_systems(Update, spawn_enemies)
+        .add_systems(Update, move_enemies)
+        .add_systems(Update, confine_enemies)
+        .add_systems(Update, check_collisions)
         .run();
 }
 
@@ -86,7 +95,7 @@ fn spawn_enemies(
     let window = window_q.single();
     
     let mut enemy_spawner = enemy_spawner_q.single_mut();
-    while enemy_spawner.current_count < enemy_spawner.max_count {
+    while enemy_spawner.current_count <= enemy_spawner.max_count {
         let random_x = rand::thread_rng().gen_range((-window.width() / 2.)..(window.width() / 2.));
         let random_y = rand::thread_rng().gen_range((-window.height() / 2.)..(window.height() / 2.));
 
@@ -95,8 +104,13 @@ fn spawn_enemies(
         let random_r = random::<f32>() * 2.;
         let random_g = random::<f32>() * 2.;
         let random_b = random::<f32>() * 2.;
+
+        let random_velx = random::<f32>() * 10.;
+        let random_vely = random::<f32>() * 10.;
         
-        commands.spawn(MaterialMesh2dBundle {
+        let random_velocity = Vec2 { x: random_velx, y: random_vely };
+
+        commands.spawn((MaterialMesh2dBundle {
             mesh: Mesh2dHandle(meshes.add(Circle { radius: random_size })),
             material: materials.add(Color::rgb(random_r, random_g, random_b)),
             transform: Transform::from_xyz(
@@ -105,7 +119,12 @@ fn spawn_enemies(
                 -1.,
             ),
             ..default()
-        });
+        },
+        Enemy {
+            velocity: random_velocity,
+            size: random_size,
+        }
+        ));
         enemy_spawner.current_count += 1;
     }
 }
@@ -129,6 +148,14 @@ fn get_player_input(
     }
     if keyboard_input.pressed(KeyCode::KeyD) {
         player_transform.translation.x += player.move_speed * time.delta_seconds();
+    }
+}
+
+fn move_enemies(
+    mut enemy_q: Query<(&mut Transform, &Enemy), With<Enemy>>,
+) {
+    for (mut enemy_transform, enemy) in enemy_q.iter_mut() {
+        enemy_transform.translation += Vec3 { x: enemy.velocity.x, y: enemy.velocity.y, z: 0. };
     }
 }
 
@@ -158,7 +185,6 @@ fn confine_player(
     let half_player_size = player.size / 2.;
     
     let mut translation = player_transform.translation;
-    println!("{:?}", translation);
 
     let x_min = -(window.width() / 2.0) + half_player_size;
     let x_max = window.width() / 2.0 - half_player_size;
@@ -181,3 +207,44 @@ fn confine_player(
     player_transform.translation = translation;
 }
 
+fn confine_enemies(
+    window_q: Query<&Window>,
+    mut enemy_q: Query<(&mut Enemy, &Transform), With<Enemy>>,
+) {
+    let window = window_q.single();
+
+    for (mut enemy, enemy_transform) in enemy_q.iter_mut() {
+        let half_enemy_size = enemy.size / 2.;
+        let translation = enemy_transform.translation;
+        
+        let x_min = -(window.width() / 2.0) + half_enemy_size;
+        let x_max = window.width() / 2.0 - half_enemy_size;
+        let y_min = -(window.height() / 2.0) + half_enemy_size;
+        let y_max = window.height() / 2.0 - half_enemy_size;
+
+        if translation.x < x_min || translation.x > x_max {
+            enemy.velocity.x = -enemy.velocity.x;
+        }
+        if translation.y < y_min || translation.y > y_max {
+            enemy.velocity.y = -enemy.velocity.y;
+        }
+    }
+}
+
+fn check_collisions(
+    player_q: Query<(&Player, &Transform), With<Player>>,
+    enemy_q: Query<(&Enemy, &Transform), With<Enemy>>,
+) {
+    let (player, player_transform) = player_q.single();
+
+    for (enemy, enemy_transform) in enemy_q.iter() {
+        let x_min = enemy_transform.translation.x - (enemy.size / 2.) - (player.size / 2.);
+        let x_max = enemy_transform.translation.x + (enemy.size / 2.) + (player.size / 2.);
+        let y_min = enemy_transform.translation.y - (enemy.size / 2.) - (player.size / 2.);
+        let y_max = enemy_transform.translation.y + (enemy.size / 2.) + (player.size / 2.);
+        
+        if player_transform.translation.x > x_min && player_transform.translation.x < x_max && player_transform.translation.y > y_min && player_transform.translation.y < y_max  {
+            println!("Collision.");
+        }
+    }
+}
